@@ -1,18 +1,17 @@
 [tool.poetry]
-name = "kaggle-bitcoin"
+name = "bitstamp_btcusd_minute_data"
 version = "0.1.0"
-description = ""
-authors = ["mczielinski <mczielinski@gmail.com>"]
+description = "Daily updates of Bitstamp BTC/USD 1 minute OHLC data with historical data since 2012"
+authors = ["Mourits de Beer <ff137@proton.me>"]
 readme = "README.md"
-packages = [{include = "kaggle_bitcoin"}]
+packages = [{ include = "scripts" }]
 
 [tool.poetry.dependencies]
-python = "^3.10"
-pandas = "^2.2.2"
-numpy = "^2.1.1"
-jupyterlab = "^4.2.5"
-kaggle = "^1.6.17"
+python = "^3.12"
+pandas = "^2.2.3"
 
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.9.4"
 
 [build-system]
 requires = ["poetry-core"]
