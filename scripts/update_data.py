@@ -49,34 +49,24 @@ def fetch_bitstamp_data(
         return []
 
 
-# Ensure bulk data exists
-def ensure_bulk_data() -> None:
-    if not os.path.exists(BULK_DATA_PATH):
-        logger.error(
-            f"Bulk dataset not found. Please ensure data is unzipped and present at {BULK_DATA_PATH}"
-        )
-        exit(1)
-
-
-# Load existing datasets
-def load_datasets() -> Tuple[pd.DataFrame, pd.DataFrame]:
-    bulk_df = pd.read_csv(BULK_DATA_PATH)
-    if os.path.exists(DAILY_DATA_PATH):
-        daily_df = pd.read_csv(DAILY_DATA_PATH)
-    else:
-        logger.info("Daily dataset not found. Creating empty daily dataset.")
-        daily_df = pd.DataFrame(columns=COLUMN_NAMES)
-    return bulk_df, daily_df
+# Ensure at least one dataset exists
+def ensure_data() -> None:
+    if not os.path.exists(DAILY_DATA_PATH):
+        if not os.path.exists(BULK_DATA_PATH):
+            logger.error(
+                f"Neither bulk dataset ({BULK_DATA_PATH}) nor daily dataset ({DAILY_DATA_PATH}) found.\n"
+                f"Please ensure data is unzipped and present at {BULK_DATA_PATH} for first run."
+            )
+            exit(1)
+        else:
+            logger.info(
+                f"Daily dataset ({DAILY_DATA_PATH}) not found. Assuming this is first run."
+            )
 
 
 # Check for missing data since the last update
-def check_missing_intervals(
-    bulk_df: pd.DataFrame, daily_df: pd.DataFrame
-) -> Tuple[int, int]:
-    if not daily_df.empty:
-        last_timestamp = int(daily_df["timestamp"].max())
-    else:
-        last_timestamp = int(bulk_df["timestamp"].max())
+def check_missing_intervals(df: pd.DataFrame) -> Tuple[int, int]:
+    last_timestamp = int(df["timestamp"].max())
     logger.debug(f"Last timestamp: {last_timestamp}")
 
     # Round current timestamp down to the nearest minute
@@ -102,9 +92,7 @@ def fetch_and_append_missing_data(
 ) -> pd.DataFrame:
     all_new_data = []
     start_timestamp, end_timestamp = missing_interval
-    logger.info(
-        f"Fetching data for missing interval from {start_timestamp} to {end_timestamp}"
-    )
+    logger.info(f"Missing data: from {start_timestamp} to {end_timestamp}")
 
     while start_timestamp < end_timestamp:
         # Calculate the number of minutes remaining
@@ -122,9 +110,7 @@ def fetch_and_append_missing_data(
         # Calculate window end - ensure `limit` records are fetched
         window_end = min(start_timestamp + ((limit - 1) * 60), end_timestamp)
 
-        logger.info(
-            f"Fetching data from {start_timestamp} to {window_end} with limit {limit}"
-        )
+        logger.info(f"Fetching {limit} rows from {start_timestamp} to {window_end}")
         new_data = fetch_bitstamp_data(
             currency_pair, start_timestamp, window_end, limit=limit
         )
@@ -156,7 +142,7 @@ def fetch_and_append_missing_data(
             break
 
     if all_new_data:
-        logger.info(f"Merging {len(all_new_data)} intervals of new data")
+        logger.debug(f"Merging {len(all_new_data)} intervals of new data")
         updated_daily_df = pd.concat([daily_df] + all_new_data, ignore_index=True)
         initial_rows = len(updated_daily_df)
 
@@ -165,16 +151,16 @@ def fetch_and_append_missing_data(
             updated_daily_df.duplicated(subset="timestamp", keep=False)
         ]
         if not duplicate_timestamps.empty:
-            logger.debug(
+            logger.info(
                 f"Duplicate timestamps detected: {duplicate_timestamps['timestamp'].tolist()}"
             )
 
         updated_daily_df.drop_duplicates(subset="timestamp", inplace=True)
         duplicates_removed = initial_rows - len(updated_daily_df)
         if duplicates_removed > 0:
-            logger.debug(f"Removed {duplicates_removed} duplicate timestamps")
+            logger.info(f"Removed {duplicates_removed} duplicate timestamps")
         updated_daily_df.sort_values(by="timestamp", ascending=True, inplace=True)
-        logger.info(f"Final dataset contains {len(updated_daily_df)} records")
+        logger.debug(f"Final dataset contains {len(updated_daily_df)} records")
         return updated_daily_df
     else:
         logger.info("No new data found to append")
@@ -254,17 +240,21 @@ def fill_missing_minutes(df: pd.DataFrame) -> pd.DataFrame:
 
 # Main execution
 if __name__ == "__main__":
-    # Ensure bulk data exists
-    ensure_bulk_data()
+    # Ensure data exists
+    ensure_data()
 
     # Load datasets
-    logger.info("Loading existing datasets")
-    bulk_df, daily_df = load_datasets()
-    logger.debug(f"Loaded bulk dataset with {len(bulk_df)} records")
-    logger.debug(f"Loaded daily dataset with {len(daily_df)} records")
+    if os.path.exists(DAILY_DATA_PATH):
+        df = pd.read_csv(DAILY_DATA_PATH)
+        logger.info(f"Loaded daily dataset with {len(df)} records")
+        daily_df = df
+    else:
+        df = pd.read_csv(BULK_DATA_PATH)
+        logger.info(f"Loaded bulk dataset with {len(df)} records")
+        daily_df = pd.DataFrame(columns=COLUMN_NAMES)  # Empty df for first run
 
     # Check for missing intervals
-    missing_interval = check_missing_intervals(bulk_df, daily_df)
+    missing_interval = check_missing_intervals(df)
 
     if missing_interval:
         # Fetch and append missing data
@@ -279,11 +269,10 @@ if __name__ == "__main__":
         updated_daily_df = validate_data_integrity(updated_daily_df)
 
         # Save the updated daily dataset
-        logger.info(f"Saving updated daily dataset to {DAILY_DATA_PATH}")
         os.makedirs(os.path.dirname(DAILY_DATA_PATH), exist_ok=True)
         updated_daily_df.to_csv(DAILY_DATA_PATH, index=False)
         logger.info(
-            f"Successfully saved {len(updated_daily_df)} records to daily dataset"
+            f"Successfully saved {len(updated_daily_df)} records to {DAILY_DATA_PATH}"
         )
     else:
         logger.info("No missing data to fetch")
